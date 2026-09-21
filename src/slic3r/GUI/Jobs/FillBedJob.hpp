@@ -26,12 +26,15 @@ class FillBedJob : public Job
     int m_status_range = 0;
     Plater *m_plater;
 
+    // Add the copies as instances of the selected object instead of as new objects.
+    bool m_instances;
+
 public:
 
     void prepare();
     void process(Ctl &ctl) override;
 
-    FillBedJob();
+    FillBedJob(bool instances = false);
 
     int status_range() const
     {

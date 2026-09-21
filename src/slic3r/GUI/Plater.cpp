@@ -20197,7 +20197,7 @@ void Plater::fill_bed_with_instances()
     auto &w = get_ui_job_worker();
     if (w.is_idle()) {
         p->take_snapshot(_u8L("Arrange"));
-        replace_job(w, std::make_unique<FillBedJob>());
+        replace_job(w, std::make_unique<FillBedJob>(true));
     }
 }
 

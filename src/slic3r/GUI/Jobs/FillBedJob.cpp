@@ -173,11 +173,19 @@ void FillBedJob::prepare()
         ap.poly = m_selected.front().poly;
         ap.bed_idx = PartPlateList::MAX_PLATES_COUNT;
         ap.itemid = -1;
-        ap.setter = [this](const ArrangePolygon &p) {
+        ap.setter = [this, sel_id](const ArrangePolygon &p) {
             ModelObject *mo = m_plater->model().objects[m_object_idx];
-            ModelObject* newObj = m_plater->model().add_object(*mo);
-            newObj->name = mo->name +" "+ std::to_string(p.itemid);
-            for (ModelInstance *newInst : newObj->instances) { newInst->apply_arrange_result(p.translation.cast<double>(), p.rotation); }
+            if (m_instances) {
+                // An instance shares its object's mesh, config and PrintObject, so N copies
+                // are sliced once instead of N times. Only the new instance takes this
+                // arrange result: the existing ones are placed by their own setters.
+                ModelInstance *newInst = mo->add_instance(*mo->instances[sel_id]);
+                newInst->apply_arrange_result(p.translation.cast<double>(), p.rotation);
+            } else {
+                ModelObject* newObj = m_plater->model().add_object(*mo);
+                newObj->name = mo->name +" "+ std::to_string(p.itemid);
+                for (ModelInstance *newInst : newObj->instances) { newInst->apply_arrange_result(p.translation.cast<double>(), p.rotation); }
+            }
             //m_plater->sidebar().obj_list()->paste_objects_into_list({m_plater->model().objects.size()-1});
         };
         m_selected.emplace_back(ap);
@@ -255,7 +263,7 @@ void FillBedJob::process(Ctl &ctl)
                                        _u8L("Bed filling done."));
 }
 
-FillBedJob::FillBedJob() : m_plater{wxGetApp().plater()} {}
+FillBedJob::FillBedJob(bool instances) : m_plater{wxGetApp().plater()}, m_instances{instances} {}
 
 void FillBedJob::finalize(bool canceled, std::exception_ptr &eptr)
 {
@@ -319,6 +327,13 @@ void FillBedJob::finalize(bool canceled, std::exception_ptr &eptr)
             obj_list->update_printable_state(i, 0);
         }
 
+        // New instances have to be registered with the plate they landed on before the
+        // scene reloads: the plate's filament list and wipe tower preview read from it.
+        const size_t new_inst_cnt = model_object->instances.size() - inst_cnt;
+        if (m_instances)
+            for (size_t i = inst_cnt; i < model_object->instances.size(); ++i)
+                plate_list.notify_instance_update(m_object_idx, int(i));
+
         BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ": paste_objects_into_list";
 
         /*for (ArrangePolygon& ap : m_selected) {
@@ -330,6 +345,11 @@ void FillBedJob::finalize(bool canceled, std::exception_ptr &eptr)
         //BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << ": model_object->ensure_on_bed()";
 
         m_plater->update();
+
+        // A single-instance object has no instance rows in the list yet, so the
+        // original instance needs a row of its own alongside the new ones.
+        if (m_instances && new_inst_cnt > 0)
+            obj_list->increase_object_instances(m_object_idx, inst_cnt == 1 ? new_inst_cnt + 1 : new_inst_cnt);
     }
 }
 

@@ -1152,6 +1152,25 @@ void GLVolumeCollection::render(GLVolumeCollection::ERenderType      type,
     if (disable_cullface)
         glsafe(::glDisable(GL_CULL_FACE));
 
+    // Everything below holds for the whole pass. It used to be handed to the shader again for
+    // every volume, which on a full plate meant a few hundred uniform lookups and driver calls
+    // per frame for values that never changed. Uniforms live on the program, so setting them
+    // once here survives the shader switches further down.
+    shader->set_uniform("z_range", m_z_range);
+    shader->set_uniform("clipping_plane", m_clipping_plane);
+    shader->set_uniform("use_color_clip_plane", m_use_color_clip_plane);
+    shader->set_uniform("color_clip_plane", m_color_clip_plane);
+    shader->set_uniform("uniform_color_clip_plane_1", m_color_clip_plane_colors[0]);
+    shader->set_uniform("uniform_color_clip_plane_2", m_color_clip_plane_colors[1]);
+    shader->set_uniform("projection_matrix", projection_matrix);
+
+    // The support threshold is a print setting, the same for every volume; reading it per
+    // volume cost two config lookups by name.
+    bool        enable_support          = false;
+    const int   support_threshold_angle = get_selection_support_threshold_angle(enable_support);
+    const float normal_z                = -::cos(Geometry::deg2rad((float) support_threshold_angle));
+    shader->set_uniform("slope.normal_z", normal_z);
+
     // Set static camera state for LOD evaluation in GLVolume rendering
     GLVolume::s_curZoom = camera.get_zoom();
     GLVolume::s_curViewProjMatrix = (projection_matrix.matrix() * view_matrix.matrix()).eval();
@@ -1187,7 +1206,7 @@ void GLVolumeCollection::render(GLVolumeCollection::ERenderType      type,
 
     for (GLVolumeWithIdAndZ& volume : to_render) {
         //CPU Frustum culling
-        auto _worldAABB = volume.first->transformed_bounding_box();
+        const auto& _worldAABB = volume.first->transformed_bounding_box();
         if (!camera.GetFrustum().Intersects(_worldAABB)) 
         {
             continue;
@@ -1206,28 +1225,21 @@ void GLVolumeCollection::render(GLVolumeCollection::ERenderType      type,
             volume.first->force_transparent = false;
 #endif // ENABLE_MODIFIERS_ALWAYS_TRANSPARENT
 
-        // render sinking contours of non-hovered volumes
-        shader->stop_using();
-        if (sink_shader != nullptr) {
+        // Render the sinking contour of a non-hovered volume. Swapping the shader program back
+        // and forth is not free, so only do it for a volume that actually has a contour to
+        // draw instead of for every volume in the scene.
+        if (m_show_sinking_contours && sink_shader != nullptr && volume.first->is_sinking() &&
+            !volume.first->is_below_printbed() && volume.first->hover == GLVolume::HS_None &&
+            !volume.first->force_sinking_contours) {
+            shader->stop_using();
             sink_shader->start_using();
-            if (m_show_sinking_contours) {
-                if (volume.first->is_sinking() && !volume.first->is_below_printbed() && volume.first->hover == GLVolume::HS_None &&
-                    !volume.first->force_sinking_contours) {
-                    volume.first->render_sinking_contours();
-                }
-            }
+            volume.first->render_sinking_contours();
             sink_shader->stop_using();
+            shader->start_using();
         }
-        shader->start_using();
 
         if (!volume.first->model.is_initialized())
             shader->set_uniform("uniform_color", volume.first->render_color);
-        shader->set_uniform("z_range", m_z_range);
-        shader->set_uniform("clipping_plane", m_clipping_plane);
-        shader->set_uniform("use_color_clip_plane", m_use_color_clip_plane);
-        shader->set_uniform("color_clip_plane", m_color_clip_plane);
-        shader->set_uniform("uniform_color_clip_plane_1", m_color_clip_plane_colors[0]);
-        shader->set_uniform("uniform_color_clip_plane_2", m_color_clip_plane_colors[1]);
         // BBS set print_volume to render volume
         // shader->set_uniform("print_volume.type", static_cast<int>(m_render_volume.type));
         // shader->set_uniform("print_volume.xy_data", m_render_volume.data);
@@ -1243,17 +1255,14 @@ void GLVolumeCollection::render(GLVolumeCollection::ERenderType      type,
             shader->set_uniform("print_volume.type", -1);
         }
 
-        bool enable_support;
-        int  support_threshold_angle = get_selection_support_threshold_angle(enable_support);
+        // world_matrix() rebuilds the transform from the instance and volume transformations, and
+        // its normal matrix costs a 3x3 inverse. Both were computed more than once per volume.
+        const Transform3d model_matrix        = volume.first->world_matrix();
+        const Matrix3d    world_normal_matrix = model_matrix.matrix().block(0, 0, 3, 3).inverse().transpose();
 
-        float normal_z = -::cos(Geometry::deg2rad((float) support_threshold_angle));
-
-        shader->set_uniform("volume_world_matrix", volume.first->world_matrix());
+        shader->set_uniform("volume_world_matrix", model_matrix);
         shader->set_uniform("slope.actived", m_slope.isGlobalActive && !volume.first->is_modifier && !volume.first->is_wipe_tower);
-        shader->set_uniform("slope.volume_world_normal_matrix",
-                            static_cast<Matrix3f>(
-                                volume.first->world_matrix().matrix().block(0, 0, 3, 3).inverse().transpose().cast<float>()));
-        shader->set_uniform("slope.normal_z", normal_z);
+        shader->set_uniform("slope.volume_world_normal_matrix", static_cast<Matrix3f>(world_normal_matrix.cast<float>()));
 
 #if ENABLE_ENVIRONMENT_MAP
         unsigned int environment_texture_id  = GUI::wxGetApp().plater()->get_environment_texture_id();
@@ -1265,11 +1274,8 @@ void GLVolumeCollection::render(GLVolumeCollection::ERenderType      type,
         glcheck();
 
         volume.first->model.set_color(volume.first->render_color);
-        const Transform3d model_matrix = volume.first->world_matrix();
         shader->set_uniform("view_model_matrix", view_matrix * model_matrix);
-        shader->set_uniform("projection_matrix", projection_matrix);
-        const Matrix3d view_normal_matrix = view_matrix.matrix().block(0, 0, 3, 3) *
-                                            model_matrix.matrix().block(0, 0, 3, 3).inverse().transpose();
+        const Matrix3d view_normal_matrix = view_matrix.matrix().block(0, 0, 3, 3) * world_normal_matrix;
         shader->set_uniform("view_normal_matrix", view_normal_matrix);
         volume.first->render();
 

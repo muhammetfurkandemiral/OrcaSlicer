@@ -1360,8 +1360,13 @@ void GLGizmoCut3D::set_volumes_picking_state(bool state)
         const Selection& selection = m_parent.get_selection();
         const Selection::IndicesList ids = selection.get_volume_idxs();
         for (unsigned int id : ids) {
-            const GLVolume* v = selection.get_volume(id);
-            auto it = std::find_if(raycasters->begin(), raycasters->end(), [v](std::shared_ptr<SceneRaycasterItem> item) { return item->get_raycaster() == v->mesh_raycaster.get(); });
+            // The selection indices are the volume indices the picking raycasters are
+            // registered under. Volumes sharing a mesh share a MeshRaycaster, so matching on
+            // the raycaster would pick whichever of them came first.
+            auto it = std::find_if(raycasters->begin(), raycasters->end(),
+                                   [id](const std::shared_ptr<SceneRaycasterItem> &item) {
+                                       return SceneRaycaster::decode_id(SceneRaycaster::EType::Volume, item->get_id()) == int(id);
+                                   });
             if (it != raycasters->end())
                 (*it)->set_active(state);
         }

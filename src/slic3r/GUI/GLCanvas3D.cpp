@@ -2465,6 +2465,22 @@ void GLCanvas3D::toggle_selected_volume_visibility(bool selected_visible)
     }
 }
 
+// A volume's picking raycaster is registered under the volume's own index (see the
+// add_raycaster_for_picking() call in reload_scene()). Volumes built from the same mesh share
+// one MeshRaycaster, so the raycaster no longer tells them apart - the index has to.
+static std::shared_ptr<SceneRaycasterItem> find_volume_raycaster(
+    const std::vector<std::shared_ptr<SceneRaycasterItem>> *raycasters, size_t volume_idx)
+{
+    if (raycasters == nullptr)
+        return nullptr;
+    auto it = std::find_if(raycasters->begin(), raycasters->end(),
+                           [volume_idx](const std::shared_ptr<SceneRaycasterItem> &item) {
+                               return SceneRaycaster::decode_id(SceneRaycaster::EType::Volume, item->get_id()) ==
+                                      int(volume_idx);
+                           });
+    return it == raycasters->end() ? nullptr : *it;
+}
+
 void GLCanvas3D::toggle_sla_auxiliaries_visibility(bool visible, const ModelObject *mo, int instance_idx)
 {
     if (current_printer_technology() != ptSLA)
@@ -2474,7 +2490,8 @@ void GLCanvas3D::toggle_sla_auxiliaries_visibility(bool visible, const ModelObje
 
     std::vector<std::shared_ptr<SceneRaycasterItem>>* raycasters = get_raycasters_for_picking(SceneRaycaster::EType::Volume);
 
-    for (GLVolume* vol : m_volumes.volumes) {
+    for (size_t vol_idx = 0; vol_idx < m_volumes.volumes.size(); ++ vol_idx) {
+        GLVolume* vol = m_volumes.volumes[vol_idx];
         if (vol->composite_id.object_id >= 1000 &&
             vol->composite_id.object_id < 1000 + wxGetApp().plater()->get_partplate_list().get_plate_count())
             continue; // the wipe tower
@@ -2482,9 +2499,8 @@ void GLCanvas3D::toggle_sla_auxiliaries_visibility(bool visible, const ModelObje
             && (instance_idx == -1 || vol->composite_id.instance_id == instance_idx)
             && vol->composite_id.volume_id < 0) {
             vol->is_active = visible;
-            auto it = std::find_if(raycasters->begin(), raycasters->end(), [vol](std::shared_ptr<SceneRaycasterItem> item) { return item->get_raycaster() == vol->mesh_raycaster.get(); });
-            if (it != raycasters->end())
-                (*it)->set_active(vol->is_active);
+            if (const std::shared_ptr<SceneRaycasterItem> item = find_volume_raycaster(raycasters, vol_idx))
+                item->set_active(vol->is_active);
         }
     }
 }
@@ -2492,7 +2508,8 @@ void GLCanvas3D::toggle_sla_auxiliaries_visibility(bool visible, const ModelObje
 void GLCanvas3D::toggle_model_objects_visibility(bool visible, const ModelObject* mo, int instance_idx, const ModelVolume* mv)
 {
     std::vector<std::shared_ptr<SceneRaycasterItem>>* raycasters = get_raycasters_for_picking(SceneRaycaster::EType::Volume);
-    for (GLVolume* vol : m_volumes.volumes) {
+    for (size_t vol_idx = 0; vol_idx < m_volumes.volumes.size(); ++ vol_idx) {
+        GLVolume* vol = m_volumes.volumes[vol_idx];
         // BBS: add partplate logic
         if (vol->composite_id.object_id >= 1000 &&
             vol->composite_id.object_id < 1000 + wxGetApp().plater()->get_partplate_list().get_plate_count()) { // wipe tower
@@ -2529,9 +2546,8 @@ void GLCanvas3D::toggle_model_objects_visibility(bool visible, const ModelObject
             }
         }
 
-        auto it = std::find_if(raycasters->begin(), raycasters->end(), [vol](std::shared_ptr<SceneRaycasterItem> item) { return item->get_raycaster() == vol->mesh_raycaster.get(); });
-        if (it != raycasters->end())
-            (*it)->set_active(vol->is_active);
+        if (const std::shared_ptr<SceneRaycasterItem> item = find_volume_raycaster(raycasters, vol_idx))
+            item->set_active(vol->is_active);
     }
 
     if (visible && !mo)
@@ -3811,7 +3827,7 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
                                 volume.model.init_from(mesh, true);
 #else
                                 volume.model.init_from(mesh);
-                                volume.mesh_raycaster = std::make_unique<GUI::MeshRaycaster>(std::make_shared<TriangleMesh>(mesh));
+                                volume.mesh_raycaster = std::make_shared<GUI::MeshRaycaster>(std::make_shared<TriangleMesh>(mesh));
 #endif // ENABLE_SMOOTH_NORMALS
                             }
                             else {
@@ -3821,7 +3837,7 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
 #else
                                 const TriangleMesh& new_mesh = m_model->objects[volume.object_idx()]->volumes[volume.volume_idx()]->mesh();
                                 volume.model.init_from(new_mesh);
-                                volume.mesh_raycaster = std::make_unique<GUI::MeshRaycaster>(std::make_shared<TriangleMesh>(new_mesh));
+                                volume.mesh_raycaster = std::make_shared<GUI::MeshRaycaster>(std::make_shared<TriangleMesh>(new_mesh));
 #endif // ENABLE_SMOOTH_NORMALS
                             }
 	                    }

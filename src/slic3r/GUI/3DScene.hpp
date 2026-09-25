@@ -240,7 +240,9 @@ public:
 
     GUI::GLModel            model;
     // raycaster used for picking
-    std::unique_ptr<GUI::MeshRaycaster> mesh_raycaster;
+    // Shared between every volume built from the same mesh: a raycaster is derived from
+    // the mesh alone and each query takes the volume's transform as an argument.
+    std::shared_ptr<GUI::MeshRaycaster> mesh_raycaster;
     // BBS
     mutable std::vector<GUI::GLModel> mmuseg_models;
     mutable ObjectBase::Timestamp       mmuseg_ts;

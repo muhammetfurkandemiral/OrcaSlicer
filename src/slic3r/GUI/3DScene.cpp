@@ -117,6 +117,8 @@ namespace Slic3r {
 struct MeshLodEntry {
     std::shared_ptr<const TriangleMesh> mesh; // keeps the key mesh alive
     std::set<GLVolume*>                  volumes;
+    // Built on demand for the first volume that needs one, then handed to the rest.
+    std::shared_ptr<GUI::MeshRaycaster>  raycaster;
 };
 static std::map<const TriangleMesh*, MeshLodEntry> g_meshVolumesMap;
 
@@ -932,7 +934,18 @@ int GLVolumeCollection::load_object_volume(const ModelObject* model_object,
     }
 
     if (need_raycaster) {
-        v.mesh_raycaster = std::make_unique<GUI::MeshRaycaster>(meshSharedPtr);
+        // Every MeshRaycaster query takes the volume's transform as an argument, so the
+        // raycaster depends on nothing but the mesh and all the volumes built from one mesh
+        // can share a single one. That is what a filled bed costs otherwise: for a detailed
+        // mesh the AABB tree, the vertex-face index and the face normals together run to a
+        // hundred megabytes, and they were being built again for every copy.
+        auto entry_it = g_meshVolumesMap.find(meshPtr);
+        if (entry_it != g_meshVolumesMap.end()) {
+            if (!entry_it->second.raycaster)
+                entry_it->second.raycaster = std::make_shared<GUI::MeshRaycaster>(meshSharedPtr);
+            v.mesh_raycaster = entry_it->second.raycaster;
+        } else
+            v.mesh_raycaster = std::make_shared<GUI::MeshRaycaster>(meshSharedPtr);
     }
     v.composite_id = GLVolume::CompositeID(obj_idx, volume_idx, instance_idx);
 
@@ -986,7 +999,7 @@ void GLVolumeCollection::load_object_auxiliary(const SLAPrintObject* print_objec
 #else
         v.model.init_from(mesh);
         v.model.set_color((milestone == slaposPad) ? GLVolume::SLA_PAD_COLOR : GLVolume::SLA_SUPPORT_COLOR);
-        v.mesh_raycaster = std::make_unique<GUI::MeshRaycaster>(std::make_shared<const TriangleMesh>(mesh));
+        v.mesh_raycaster = std::make_shared<GUI::MeshRaycaster>(std::make_shared<const TriangleMesh>(mesh));
 #endif // ENABLE_SMOOTH_NORMALS
         v.composite_id = GLVolume::CompositeID(obj_idx, -int(milestone), (int) instance_idx.first);
         v.geometry_id  = std::pair<size_t, size_t>(timestamp, model_instance.id().id);
@@ -1037,7 +1050,7 @@ int GLVolumeCollection::load_wipe_tower_preview(
         v.model_per_colors[i].init_from(color_part);
     }
     v.model.init_from(wipe_tower_shell);
-    v.mesh_raycaster = std::make_unique<GUI::MeshRaycaster>(std::make_shared<const TriangleMesh>(wipe_tower_shell));
+    v.mesh_raycaster = std::make_shared<GUI::MeshRaycaster>(std::make_shared<const TriangleMesh>(wipe_tower_shell));
     v.set_convex_hull(wipe_tower_shell);
     v.set_volume_offset(Vec3d(pos_x, pos_y, 0.0));
     v.set_volume_rotation(Vec3d(0., 0., (M_PI / 180.) * rotation_angle));

@@ -9594,7 +9594,7 @@ msgstr "%1% çok uzun ve çarpışmalara neden olacak."
 
 msgid " is too close to others, there may be collisions when printing."
 msgstr ""
-" başkalarına çok yakınsa, yazdırma sırasında çarpışmalar meydana gelebilir."
+" diğer nesnelere çok yakın, yazdırma sırasında çarpışmalar meydana gelebilir."
 
 msgid " is too close to exclusion area, there may be collisions when printing."
 msgstr ""
@@ -9605,7 +9605,7 @@ msgid "Prime Tower"
 msgstr "Prime Kulesi"
 
 msgid " is too close to others, and collisions may be caused.\n"
-msgstr " başkalarına çok yakın olduğundan çarpışmalara neden olabilir.\n"
+msgstr " diğer nesnelere çok yakın olduğundan çarpışmalara neden olabilir.\n"
 
 msgid " is too close to exclusion area, and collisions will be caused.\n"
 msgstr " dışlama alanına çok yakın ve çarpışmalara neden olacak.\n"
